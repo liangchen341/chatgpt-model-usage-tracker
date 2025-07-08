@@ -23,8 +23,6 @@ However, Plus accounts have usage limits for models like GPT-4 and Deep Research
 
 *After the script is running, a clean and simple statistics panel will appear in the bottom-right corner of the ChatGPT page.*
 
-![Screenshot of the script in action](https://i.imgur.com/your-screenshot-image-url.png)
-> **(Note: Please replace this with a URL to your own screenshot)**
 > An example screenshot would look something like this:
 > ```
 > 📊 Model Stats
