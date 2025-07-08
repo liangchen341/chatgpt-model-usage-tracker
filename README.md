@@ -4,7 +4,9 @@
 [![Version](https://img.shields.io/badge/version-3.1-blue.svg)](https://github.com/your-username/your-repo)
 [![Greasy Fork](https://img.shields.io/badge/Greasy_Fork-Install-green.svg)](https://greasyfork.org/scripts/your-script-id) 一个简单的 Tampermonkey 用户脚本，用于在 ChatGPT 网页版实时追踪并统计不同模型（如 GPT-4o, GPT-4, Deep Research 等）的使用次数。帮助你精细化管理 Plus 账户的资源，避免达到使用上限。
 
-[English Version](./README.en.md) ---
+[English Version](./README.en.md) 
+
+---
 
 ### 🌟 项目背景
 
