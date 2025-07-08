@@ -18,8 +18,6 @@
 ### 🎨 功能截图
 
 *脚本运行后，会在 ChatGPT 页面的右下角显示一个简洁的统计悬浮窗。*
-
-![脚本运行效果截图](https://i.imgur.com/your-screenshot-image-url.png)
 > 一个示例截图大概会是这样：
 > ```
 > 📊 模型统计
