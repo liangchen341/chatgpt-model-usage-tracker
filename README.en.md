@@ -77,6 +77,26 @@ Once installed, open or refresh the [ChatGPT website](https://chat.openai.com/) 
 * Each time you interact with ChatGPT, the count for the corresponding model will automatically increase by one.
 * To reset the data, simply **left-click** the stats box and click "OK" in the confirmation dialog that appears.
 
+### ⚠️ Important: First-Time Permission Setup
+
+In some cases, especially on Chromium-based browsers (like Google Chrome or Microsoft Edge), the userscript may not run immediately even after installation. This is often due to the browser's security features, which require you to manually grant the Tampermonkey extension permission to operate on the ChatGPT website.
+
+Please follow these steps to check and enable the required permissions:
+
+1.  **Find the Extension Management Option**
+    Navigate to the [ChatGPT website](https://chat.openai.com/), then **right-click** the Tampermonkey icon in your browser's toolbar (usually in the top-right corner). In the context menu that appears, click on **"Manage extension"**.
+
+    > *Tip: If the menu shows a message like "This can't read or change site data," you will almost certainly need to perform this setup.*
+
+2.  **Enable "Allow running user scripts"**
+    On the extension's details page, find the option labeled **"Allow running user scripts"** and ensure that the toggle switch next to it is in the **ON (blue)** position.
+
+
+    > *Please be mindful of the security warning displayed by the browser. As this script is open-source, you can review its code at any time to confirm its safety. It is designed to run only on the `chat.openai.com` and `chatgpt.com` domains, and all data is stored locally.*
+
+3.  **Reload the Page**
+    After completing the setup, return to the ChatGPT tab and reload the page. The script's statistics window should now appear correctly in the bottom-right corner.
+
 ### 🛠️ How It Works
 
 The core of this script is to "hook" the browser's native network request functions:
