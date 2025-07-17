@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         ChatGPT Model Usage Tracker (ultimate+DR)
+// @name         ChatGPT Model Usage Tracker (ultimate+DR) v3.5.1
 // @namespace    https://example.local
-// @version      3.1
-// @description  本地统计 ChatGPT 各模型与 Deep Research 使用次数（兼容 fetch + XHR，无需开发者模式）
+// @version      3.5.1
+// @description  本地统计 ChatGPT 各模型总量 + 当日增量（按本地时区归零）
 // @match        https://chat.openai.com/*
 // @match        https://chatgpt.com/*
 // @run-at       document-start
@@ -11,121 +11,163 @@
 
 (() => {
   /******************** 0. 配置 ************************/
-  const KEY       = '__cgpt_usage__';                       // localStorage 键
-  const MATCH_RE  = /(\/backend-api\/.*conversation|completions$)|\/v1\/chat\/completions/;
-  const seenDR    = new Set();                              // 已计数过的 Deep Research conversation_id
+  const KEY_TOTAL   = '__cgpt_usage__';
+  const KEY_DAILY   = '__cgpt_usage_daily__';
+  const KEY_DAYFLAG = '__cgpt_usage_day__';
+
+  const seenDR      = new Set();
+  const seenMessage = new Set();
 
   /******************** 1. 数据层 **********************/
-  const stats = JSON.parse(localStorage.getItem(KEY) || '{}');
-  const bump  = (m) => {
-    stats[m] = (stats[m] || 0) + 1;
-    localStorage.setItem(KEY, JSON.stringify(stats));
+  const stats  = JSON.parse(localStorage.getItem(KEY_TOTAL)   || '{}');
+  let   daily  = JSON.parse(localStorage.getItem(KEY_DAILY)   || '{}');
+  let   dayFlag = localStorage.getItem(KEY_DAYFLAG) || '';
+
+  // **本地时区日期**
+  const todayStr = () => new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
+
+  const ensureToday = () => {
+    const now = todayStr();
+    if (now !== dayFlag) {
+      dayFlag = now;
+      daily   = {};
+      localStorage.setItem(KEY_DAILY,   JSON.stringify(daily));
+      localStorage.setItem(KEY_DAYFLAG, dayFlag);
+    }
+  };
+
+  const bump = (model) => {
+    ensureToday();
+    stats[model] = (stats[model] || 0) + 1;
+    daily[model] = (daily[model] || 0) + 1;
+    localStorage.setItem(KEY_TOTAL, JSON.stringify(stats));
+    localStorage.setItem(KEY_DAILY, JSON.stringify(daily));
     render();
   };
 
-  /******************** 2. UI 层 ***********************/
+  /******************** 2. UI *************************/
   let box;
   const mountUI = () => {
     if (!document.body || (box && document.body.contains(box))) return;
+
     box = document.createElement('div');
     Object.assign(box.style, {
       position:'fixed', right:'16px', bottom:'16px', zIndex:99999,
       background:'rgba(0,0,0,.78)', color:'#fff', font:'13px/1.4 monospace',
       padding:'8px 14px', borderRadius:'8px', whiteSpace:'pre-wrap',
-      userSelect:'none', cursor:'pointer', maxWidth:'280px'
+      userSelect:'none', cursor:'pointer', maxWidth:'300px'
     });
     box.onclick = () => {
       if (confirm('清空统计数据？')) {
         for (const k in stats) delete stats[k];
-        localStorage.setItem(KEY,'{}');
+        for (const k in daily) delete daily[k];
+        localStorage.setItem(KEY_TOTAL,'{}');
+        localStorage.setItem(KEY_DAILY,'{}');
         render();
       }
     };
     document.body.appendChild(box);
     render();
   };
+
   const render = () => {
     if (!box) return;
-    box.textContent = '📊 模型统计\n' +
-      (Object.keys(stats).length
-        ? Object.entries(stats)
-            .sort((a,b)=>b[1]-a[1])
-            .map(([m,c])=>`${m}: ${c}`).join('\n')
-        : '暂无数据');
+    ensureToday();
+    const arrow = '▲';
+    const green = (txt) => `<span style="color:#4caf50">${txt}</span>`;
+    const lines = Object.keys(stats).length
+      ? Object.entries(stats)
+          .sort((a,b)=>b[1]-a[1])
+          .map(([m,c])=>{
+            const inc = daily[m] ? ` ${green(arrow + '(+' + daily[m] + ')')}` : '';
+            return `${m}: ${c}${inc}`;
+          })
+      : ['暂无数据'];
+    box.innerHTML = '📊 模型统计<br>' + lines.join('<br>');
   };
-  document.addEventListener('DOMContentLoaded', mountUI);
-  setInterval(mountUI, 3000);      // 保活，防路由卸载
 
-  /******************** 3. 捕获 fetch ******************/
+  document.addEventListener('DOMContentLoaded', mountUI);
+  setInterval(mountUI, 3000);
+
+  /******************** 3. fetch/XHR 拦截（与 v3.5 相同） ********************/
   const origFetch = unsafeWindow.fetch;
   unsafeWindow.fetch = async function(input, init = {}) {
-    hookRequest(typeof input === 'string' ? input : input.url, init.body || input.body);
+    const req = input instanceof Request ? input : new Request(input, init);
+    if (req.method !== 'POST' || req.url.startsWith('chrome-extension')) {
+      return origFetch.apply(this, arguments);
+    }
+    let bodyStr = '';
+    try { bodyStr = await req.clone().text(); } catch(_) {}
+    hook(bodyStr);
     return origFetch.apply(this, arguments);
   };
 
-  /******************** 4. 捕获 XHR ********************/
   (function() {
     const origOpen = XMLHttpRequest.prototype.open;
     const origSend = XMLHttpRequest.prototype.send;
-    const urlHolder = new WeakMap();
+    const urlCache = new WeakMap();
 
-    XMLHttpRequest.prototype.open = function(method, url, ...rest) {
-      urlHolder.set(this, {method, url});
-      return origOpen.call(this, method, url, ...rest);
+    XMLHttpRequest.prototype.open = function(m,u,...rest) {
+      urlCache.set(this, {method:m,url:u});
+      return origOpen.call(this, m, u, ...rest);
     };
     XMLHttpRequest.prototype.send = function(body) {
-      const info = urlHolder.get(this);
-      if (info && info.method?.toUpperCase() === 'POST' && MATCH_RE.test(info.url))
-        hookRequest(info.url, body);
+      const {method} = urlCache.get(this) || {};
+      if (method?.toUpperCase() === 'POST') {
+        readBody(body).then(hook);
+      }
       return origSend.call(this, body);
     };
   })();
 
-  /******************** 5. 通用解析函数 ****************/
-  async function hookRequest(url, body) {
-    if (!MATCH_RE.test(url)) return;
+  /******************** 5. 主逻辑（保持不变） **********************/
+  async function hook(bodyStr){
+    if (!bodyStr) return;
 
-    try {
-      const txt = await bodyToString(body);
-      if (!txt) return;
-      const payload = JSON.parse(txt);
+    let payload;
+    try { payload = JSON.parse(bodyStr); } catch { return; }
 
-      /* ---------- A. Deep Research 侦测 ---------- */
-      if (Array.isArray(payload.system_hints) &&
-          payload.system_hints.includes('research')) {
+    if (Array.isArray(payload.system_hints) &&
+        payload.system_hints.includes('research')) {
+    // >>> 新增：仅统计真正由用户发起的深度研究请求 <<<
+     const firstMsg = payload.messages?.[0];
+     const role = firstMsg?.author?.role ?? firstMsg?.role;
+     if (role !== 'user') return;          // 后台请求，直接忽略
 
-        const cid = payload.conversation_id;
-        if (cid && !seenDR.has(cid)) {        // 首次遇到该 DR 流程
-          bump('deep_research');
-          seenDR.add(cid);
-          console.log('[USAGE-TRACKER] catch deep_research', cid);
-        }
-        return;                               // 终止，避免被普通模型再计数
-      }
+     const cid = payload.conversation_id;
+     if (cid && !seenDR.has(cid)) {
+       bump('deep_research');
+       seenDR.add(cid);
+    }
+    return;
+    }
 
-      /* ---------- B. 普通模型计数 ---------- */
-      let model = payload.model || 'unknown';
+    if (!payload.model) return;
 
-      // 若请求体没带 model，就尝试从页面 UI 猜测
-      if (model === 'unknown') {
-        model =
-          document.querySelector('div.truncate.text-sm a.flex')?.innerText?.trim() ||
-          document.querySelector('h1.text-lg.font-medium')?.innerText?.trim() ||
-          model;
-      }
-      bump(model);
-      console.log('[USAGE-TRACKER] catch', model);
+    const firstMsg = payload.messages?.[0];
+    if (!firstMsg) return;
 
-    } catch (_) { /* ignore */ }
+    const role  = firstMsg.author?.role ?? firstMsg.role;
+    const parts = firstMsg.content?.parts;
+    if (role !== 'user')       return;
+    if (!Array.isArray(parts) || parts.length === 0) return;
+
+    const msgId = firstMsg.id;
+    if (msgId && seenMessage.has(msgId)) return;
+    if (msgId) seenMessage.add(msgId);
+
+    bump(payload.model);
   }
 
-  function bodyToString(b) {
+  async function readBody(b){
     if (!b) return '';
     if (typeof b === 'string') return b;
     if (b instanceof FormData || b instanceof URLSearchParams) return b.toString();
-    if (b?.clone) return b.clone().text();
+    if (b?.clone) {
+      try { return await b.clone().text(); } catch {}
+    }
     return '';
   }
 
-  console.log('[USAGE-TRACKER] ultimate+DR version injected');
+  console.log('[USAGE-TRACKER] v3.5.1 injected');
 })();
