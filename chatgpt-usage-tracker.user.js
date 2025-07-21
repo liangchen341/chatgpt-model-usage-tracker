@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         ChatGPT Model Usage Tracker (ultimate+DR) v3.5.1
+// @name         ChatGPT Model Usage Tracker (ultimate+DR+Agent) v3.6
 // @namespace    https://example.local
-// @version      3.5.1
-// @description  本地统计 ChatGPT 各模型总量 + 当日增量（按本地时区归零）
+// @version      3.6
+// @description  本地统计 ChatGPT 各模型、Deep‑Research、Agent‑mode 总量 + 当日增量（按本地时区归零）
 // @match        https://chat.openai.com/*
 // @match        https://chatgpt.com/*
 // @run-at       document-start
@@ -16,6 +16,7 @@
   const KEY_DAYFLAG = '__cgpt_usage_day__';
 
   const seenDR      = new Set();
+  const seenAgent   = new Set();   // NEW: 记录已计数的 agent 会话
   const seenMessage = new Set();
 
   /******************** 1. 数据层 **********************/
@@ -23,9 +24,7 @@
   let   daily  = JSON.parse(localStorage.getItem(KEY_DAILY)   || '{}');
   let   dayFlag = localStorage.getItem(KEY_DAYFLAG) || '';
 
-  // **本地时区日期**
   const todayStr = () => new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
-
   const ensureToday = () => {
     const now = todayStr();
     if (now !== dayFlag) {
@@ -49,7 +48,6 @@
   let box;
   const mountUI = () => {
     if (!document.body || (box && document.body.contains(box))) return;
-
     box = document.createElement('div');
     Object.assign(box.style, {
       position:'fixed', right:'16px', bottom:'16px', zIndex:99999,
@@ -120,28 +118,49 @@
     };
   })();
 
-  /******************** 5. 主逻辑（保持不变） **********************/
+  /******************** 5. 主逻辑 **********************/
   async function hook(bodyStr){
     if (!bodyStr) return;
 
     let payload;
     try { payload = JSON.parse(bodyStr); } catch { return; }
 
+    /*** 1️⃣ Agent‑mode ***************************************************/
+    // NEW: 如果 system_hints 含 agent，且是用户发起的第一条，就记一次
+    if (Array.isArray(payload.system_hints) &&
+        payload.system_hints.includes('agent')) {
+
+      const firstMsg = payload.messages?.[0];
+      const role = firstMsg?.author?.role ?? firstMsg?.role;
+      if (role !== 'user') return;          // 后台请求，直接忽略
+
+
+      // conversation_id 为 null 时退回到首条消息的 id
+      const key = payload.conversation_id || firstMsg?.id;
+      if (key && !seenAgent.has(key)) {
+        bump('agent_mode');
+        seenAgent.add(key);
+      }
+      return; // **重要**：不要再落入普通 model 计数，避免重复
+    }
+
+    /*** 2️⃣ Deep‑Research（逻辑保持不变，但移到 Agent 检测之后） ***/
     if (Array.isArray(payload.system_hints) &&
         payload.system_hints.includes('research')) {
-    // >>> 新增：仅统计真正由用户发起的深度研究请求 <<<
-     const firstMsg = payload.messages?.[0];
-     const role = firstMsg?.author?.role ?? firstMsg?.role;
-     if (role !== 'user') return;          // 后台请求，直接忽略
 
-     const cid = payload.conversation_id;
-     if (cid && !seenDR.has(cid)) {
-       bump('deep_research');
-       seenDR.add(cid);
-    }
-    return;
+      const firstMsg = payload.messages?.[0];
+      const role = firstMsg?.author?.role ?? firstMsg?.role;
+      if (role !== 'user') return;          // 后台请求，直接忽略
+
+      const cid = payload.conversation_id;
+      if (cid && !seenDR.has(cid)) {
+        bump('deep_research');
+        seenDR.add(cid);
+      }
+      return;
     }
 
+    /*** 3️⃣ 普通模型调用 **************************************************/
     if (!payload.model) return;
 
     const firstMsg = payload.messages?.[0];
@@ -169,5 +188,5 @@
     return '';
   }
 
-  console.log('[USAGE-TRACKER] v3.5.1 injected');
+  console.log('[USAGE-TRACKER] v3.6 injected');
 })();
